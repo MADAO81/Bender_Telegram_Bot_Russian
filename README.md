@@ -31,8 +31,7 @@
 ### 1. Клонируйте репозиторий
 
 ```bash
-git clone https://github.com/ваш-аккаунт/bender-telegram-bot.git
-cd bender-telegram-bot
+git clone https://github.com/MADAO81/Bender_Telegram_Bot_Russian.git
 2. Установите зависимости
 bash
 pip install -r requirements.txt
