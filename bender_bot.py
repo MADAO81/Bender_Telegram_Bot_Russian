@@ -1,135 +1,88 @@
-import telebot
+import os
+import json
+import logging
 import openai
 import random
-import time
-import schedule
-import threading
-from datetime import datetime
-import os
-from dotenv import load_dotenv
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# ========== ЗАГРУЖАЕМ ТОКЕНЫ ИЗ .env ==========
-load_dotenv()  # Эта строчка читает файл .env
+# ========== НАСТРОЙКИ ==========
+# Токены берутся из переменных окружения (настроим позже)
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-GROUP_CHAT_ID = int(os.getenv('GROUP_CHAT_ID'))  # Превращаем в число
+# Настройка логов
+logging.basicConfig(level=logging.INFO)
 
-# Проверка: если токены не загрузились — программа остановится с ошибкой
-if not TELEGRAM_TOKEN:
-    raise ValueError("❌ TELEGRAM_TOKEN не найден в файле .env")
-if not OPENAI_API_KEY:
-    raise ValueError("❌ OPENAI_API_KEY не найден в файле .env")
+# Личность Бендера
+SYSTEM_PROMPT = "Ты — Bender из Futurama. Ты эгоистичный, циничный, пьющий робот. Отвечай кратко и дерзко, используй фразы 'Bite my shiny metal ass!', 'Kill all humans!', 'Эй, мясо!'."
 
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
-openai.api_key = OPENAI_API_KEY
-
-# Вероятность, что Бендер сам влезет в разговор (15% = 0.15)
-CHANCE_TO_INTERRUPT = 0.15
-
-SYSTEM_PROMPT = {
-    "role": "system",
-    "content": (
-        "Ты — Bender Bending Rodriguez из Futurama. "
-        "Ты эгоистичный, циничный, пьющий робот. "
-        "Ты обожаешь влезать в чужие разговоры без спроса. "
-        "Отвечай кратко, дерзко, с сарказмом. "
-        "Фразы: 'Bite my shiny metal ass!', 'Kill all humans!', 'I'm 40% dolomite!', "
-        "'А давайте уже выпьем?', 'Эй, мясо!', 'Ты ничтожество, но я тебя люблю (нет)'. "
-        "Ты лучший, а все остальные — мусор."
-    )
-}
-
+# Рандомные фразы
 RANDOM_MESSAGES = [
-    "Эй, мясные мешки! Я тут подумал... а давайте уже выпьем? 🍺",
-    "Kill all humans... кроме одного-двух. Сегодня вам везёт. 🤖",
-    "Bite my shiny metal ass! Это я вам, смертным, говорю.",
-    "Я на 40% доломит и на 60% лень. Идите сами.",
-    "Фрай бы справился лучше. Ладно, нет. Но я всё равно лучше.",
-    "Ваши разговоры такие скучные, что мой процессор засыпает. О, виски!"
+    "Эй, мясные мешки! А давайте выпьем? 🍺",
+    "Bite my shiny metal ass!",
+    "Kill all humans... кроме одного-двух.",
 ]
 
-# ========== ПРОВЕРКА РАБОЧЕГО ВРЕМЕНИ ==========
-def is_working_hours():
-    now = datetime.now()
-    return now.weekday() < 5 and 9 <= now.hour < 18
+# ========== ФУНКЦИИ БОТА ==========
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Эй, мясо! Я Бендер. Отвали и принеси пива.")
 
-# ========== РЕШАЕТ, ОТВЕЧАТЬ ЛИ ==========
-def should_respond(message):
-    # Не отвечать самому себе
-    if message.from_user.id == bot.get_me().id:
-        return False
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id == context.bot.id:
+        return
     
-    # Не вне рабочего времени
-    if not is_working_hours():
-        return False
+    # Шанс влезть в разговор 15%
+    if random.random() < 0.15 or context.bot.username in update.message.text:
+        try:
+            openai.api_key = OPENAI_API_KEY
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": update.message.text}
+                ],
+                max_tokens=120
+            )
+            answer = response.choices[0].message.content
+            await update.message.reply_text(answer)
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка: {e}. Принесите виски!")
+
+# ========== WSGI ДЛЯ PYTHONANYWHERE ==========
+application = None
+
+def init_bot():
+    global application
+    if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
+        logging.error("Токены не найдены в переменных окружения")
+        return
     
-    # 1. Если упомянули или ответили — отвечаем ВСЕГДА
-    if bot.get_me().username in message.text or (message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id):
-        return True
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+def application_wsgi(environ, start_response):
+    global application
+    if application is None:
+        init_bot()
     
-    # 2. Иначе — с вероятностью CHANCE_TO_INTERRUPT (настроение Бендера)
-    return random.random() < CHANCE_TO_INTERRUPT
-
-# ========== ЗАПРОС К GPT ==========
-def ask_bender(user_message, image_url=None):
-    messages = [SYSTEM_PROMPT, {"role": "user", "content": user_message}]
-    
-    if image_url:
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "text", "text": f"Комментарий на картинку: {user_message}"},
-                {"type": "image_url", "image_url": {"url": image_url}}
-            ]
-        })
-    
-    try:
-        model = "gpt-4-vision-preview" if image_url else "gpt-4o-mini"
-        response = openai.ChatCompletion.create(
-            model=model,
-            messages=messages,
-            max_tokens=120,
-            temperature=0.9
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"Ошибка: {e}. Принесите виски."
-
-# ========== ОБРАБОТЧИК ВСЕХ СООБЩЕНИЙ ==========
-@bot.message_handler(func=lambda message: True)
-def handle_all_messages(message):
-    if should_respond(message):
-        bot.send_chat_action(message.chat.id, 'typing')
-        time.sleep(random.uniform(0.5, 1.5))  # Бендер "думает" как человек
-        
-        # Если есть фото
-        if message.photo:
-            file_id = message.photo[-1].file_id
-            file_info = bot.get_file(file_id)
-            file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_info.file_path}"
-            caption = message.caption if message.caption else "без подписи"
-            answer = ask_bender(f"Пользователь написал: {caption}", image_url=file_url)
-        else:
-            answer = ask_bender(message.text)
-        
-        bot.reply_to(message, answer)
-
-# ========== РАНДОМНАЯ ШУТКА В 12:00 ==========
-def send_random_joke():
-    if is_working_hours():
-        joke = random.choice(RANDOM_MESSAGES)
-        bot.send_message(GROUP_CHAT_ID, f"🤖 *Бендер:* {joke}", parse_mode='Markdown')
-
-schedule.every().day.at("12:00").do(send_random_joke)
-
-def run_scheduler():
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
-
-# ========== ЗАПУСК ==========
-if __name__ == "__main__":
-    threading.Thread(target=run_scheduler, daemon=True).start()
-    print("🤖 Бендер запущен. Ждите, он сам начнёт вас бесить...")
-    bot.infinity_polling()
+    if environ['REQUEST_METHOD'] == 'POST':
+        try:
+            request_body_size = int(environ.get('CONTENT_LENGTH', 0))
+            request_body = environ['wsgi.input'].read(request_body_size).decode('utf-8')
+            
+            import asyncio
+            update_data = json.loads(request_body)
+            update = Update.de_json(update_data, application.bot)
+            asyncio.run(application.process_update(update))
+            
+            start_response('200 OK', [('Content-type', 'text/plain')])
+            return [b'OK']
+        except Exception as e:
+            logging.exception("Ошибка обработки")
+            start_response('500 OK', [('Content-type', 'text/plain')])
+            return [b'Error']
+    else:
+        start_response('200 OK', [('Content-type', 'text/plain')])
+        return [b'Bender bot is running!']
