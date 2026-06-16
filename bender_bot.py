@@ -1,9 +1,14 @@
-# bender_bot.py — VPS версия (без Flask)
+# bender_bot.py — VPS версия с .env и OpenAI
+import os
 import sys
 import random
 from datetime import datetime
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
+
+# Загружаем переменные из .env
+load_dotenv()
 
 # Импортируем ваши модули
 from jokes.mood_system import get_joke_by_mood, get_mood_description
@@ -11,11 +16,22 @@ from jokes.jokes_bank import JOKES_BANK
 from jokes.mood_templates import get_joke_with_generator
 from jokes.triggers import get_trigger_reaction_with_mood
 
+# ========== ТОКЕНЫ ИЗ .ENV ==========
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+if not TELEGRAM_TOKEN:
+    print("❌ ОШИБКА: TELEGRAM_TOKEN не найден в .env!", file=sys.stderr)
+    sys.exit(1)
+
+if not OPENAI_API_KEY:
+    print("⚠️ ПРЕДУПРЕЖДЕНИЕ: OPENAI_API_KEY не найден. Бот будет работать без GPT.", file=sys.stderr)
+
 # ========== НАСТРОЙКИ ==========
-TOKEN = 
 WEEKLY_JOKE_LIMIT = 20
 CHANCE_TO_JOKE = 0.10
 COOLDOWN_MINUTES = 15
+USE_OPENAI = bool(OPENAI_API_KEY)  # Если ключ есть — используем GPT
 
 # ========== СТАТИСТИКА ==========
 stats = {
@@ -56,7 +72,8 @@ async def start(update: Update, context):
         f"🤖 *Bender Bending Rodriguez* — к вашим услугам!\n\n"
         f"Моё текущее настроение: {mood_desc}\n"
         f"В банке шуток: {len(JOKES_BANK)}+ вариантов\n"
-        f"Лимит на неделю: {WEEKLY_JOKE_LIMIT} шуток\n\n"
+        f"Лимит на неделю: {WEEKLY_JOKE_LIMIT} шуток\n"
+        f"{'🧠 OpenAI: ВКЛЮЧЕН' if USE_OPENAI else '🧠 OpenAI: ОТКЛЮЧЕН'}\n\n"
         f"*Bite my shiny metal ass!*\n\n"
         f"📝 *Команды:*\n"
         f"/stats — статистика шуток\n"
@@ -107,9 +124,39 @@ async def help_command(update: Update, context):
         f"/mood — текущее настроение\n"
         f"/characters — герои Футурамы\n"
         f"/help — помощь\n\n"
-        f"*Триггеры:* «работа» 😠, «пиво» 🍺, «Фрай» 🤖",
+        f"*Триггеры:* «работа» 😠, «пиво» 🍺, «Фрай» 🤖\n"
+        f"{'🧠 OpenAI: включён для умных ответов' if USE_OPENAI else '🧠 OpenAI: отключён'}",
         parse_mode='Markdown'
     )
+
+async def get_openai_response(prompt: str) -> str:
+    """Получить ответ от OpenAI с характером Бендера"""
+    if not USE_OPENAI:
+        return None
+    
+    try:
+        import openai
+        openai.api_key = OPENAI_API_KEY
+        
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",  # Используем дешёвую модель
+            messages=[
+                {"role": "system", "content": 
+                    "Ты — Bender Bending Rodriguez из Futurama. "
+                    "Ты эгоистичный, циничный, пьющий робот. "
+                    "Отвечай кратко, дерзко, с сарказмом. "
+                    "Ты лучший, а все остальные — мусор. "
+                    "Используй фирменные фразы Бендера."
+                },
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=120,
+            temperature=0.9
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"❌ OpenAI ошибка: {e}", file=sys.stderr)
+        return None
 
 async def handle_message(update: Update, context):
     if update.message.from_user.id == context.bot.id:
@@ -123,14 +170,14 @@ async def handle_message(update: Update, context):
     
     print(f"📨 Получено: {text}", file=sys.stderr)
     
-    # Триггеры
+    # 1. Триггеры (самый высокий приоритет)
     _, current_mood = get_joke_by_mood()
     trigger_response = get_trigger_reaction_with_mood(text, current_mood)
     if trigger_response:
         await update.message.reply_text(f"🤖 *Бендер:* {trigger_response}", parse_mode='Markdown')
         return
     
-    # Шутки (10%)
+    # 2. Шутки (10% шанс)
     if random.random() < CHANCE_TO_JOKE and can_joke():
         joke, _ = get_joke_by_mood()
         if random.random() < 0.3:
@@ -139,14 +186,22 @@ async def handle_message(update: Update, context):
         await update.message.reply_text(f"🤖 *Бендер:* {joke}", parse_mode='Markdown')
         return
     
-    # Обычный ответ
+    # 3. OpenAI (если включён и это не слишком длинный запрос)
+    if USE_OPENAI and len(text) > 10:
+        print("🧠 Запрос к OpenAI...", file=sys.stderr)
+        gpt_response = await get_openai_response(text)
+        if gpt_response:
+            await update.message.reply_text(f"🤖 *Бендер:* {gpt_response}", parse_mode='Markdown')
+            return
+    
+    # 4. Обычный ответ (если ничего не сработало)
     await update.message.reply_text(
         f"🤖 *Бендер:* {text}\n\n*Bite my shiny metal ass!*",
         parse_mode='Markdown'
     )
 
 # ========== РЕГИСТРАЦИЯ ==========
-bot_app = Application.builder().token(TOKEN).build()
+bot_app = Application.builder().token(TELEGRAM_TOKEN).build()
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CommandHandler("stats", stats_command))
 bot_app.add_handler(CommandHandler("mood", mood_command))
@@ -157,4 +212,6 @@ bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messa
 # ========== ЗАПУСК ==========
 if __name__ == "__main__":
     print("🚀 Бендер запускается на VPS через polling...")
+    print(f"📋 Токен Telegram: {TELEGRAM_TOKEN[:10]}... (скрыто)")
+    print(f"📋 OpenAI: {'ВКЛЮЧЕН' if USE_OPENAI else 'ОТКЛЮЧЕН'}")
     bot_app.run_polling()
