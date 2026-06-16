@@ -385,8 +385,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ========== ЗАПУСК БОТА ==========
-async def main():
-    """Главная функция"""
+if __name__ == "__main__":
     print("🚀 Бендер запускается на VPS через polling...")
     print(f"📋 Токен Telegram: {TELEGRAM_TOKEN[:10]}... (скрыто)")
     print(f"📋 OpenAI: {'ВКЛЮЧЕН' if USE_OPENAI else 'ОТКЛЮЧЕН'}")
@@ -410,8 +409,7 @@ async def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Запускаем бота
-    await app.run_polling()
-
+    # Запускаем бота (БЕЗ asyncio.run!)
+    app.run_polling()
 if __name__ == "__main__":
     asyncio.run(main())
