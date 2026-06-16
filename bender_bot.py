@@ -1,4 +1,4 @@
-# bender_bot.py — версия без расписания, только спонтанные шутки
+# bender_bot.py — полная версия для VPS с исправленным OpenAI
 import os
 import sys
 import json
@@ -79,17 +79,14 @@ def can_joke(stats: dict) -> bool:
     week_start = datetime.strptime(stats['week_start'], '%Y-%m-%d').date()
     today = datetime.now().date()
     
-    # Сброс счётчика в начале новой недели
     if (today - week_start).days >= 7:
         stats['week_start'] = today.strftime('%Y-%m-%d')
         stats['jokes_count'] = 0
         save_stats(stats)
     
-    # Проверка лимита
     if stats['jokes_count'] >= WEEKLY_JOKE_LIMIT:
         return False
     
-    # Проверка таймаута между шутками
     if stats['last_joke_time']:
         last_joke = datetime.fromisoformat(stats['last_joke_time'])
         if (datetime.now() - last_joke).total_seconds() < COOLDOWN_MINUTES * 60:
@@ -122,7 +119,6 @@ def register_user(stats: dict, user_id: int, username: str = None):
         'last_active': datetime.now().isoformat()
     }
     
-    # Обновляем или добавляем
     for i, user in enumerate(stats['users_interacted']):
         if user['id'] == user_id:
             stats['users_interacted'][i]['last_active'] = datetime.now().isoformat()
@@ -141,10 +137,10 @@ async def analyze_image(image_url: str) -> str:
         return "🧠 OpenAI отключён. Но картинка, наверное, классная!"
     
     try:
-        import openai
-        openai.api_key = OPENAI_API_KEY
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
         
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": 
@@ -174,10 +170,10 @@ async def get_openai_response(prompt: str) -> str:
         return None
     
     try:
-        import openai
-        openai.api_key = OPENAI_API_KEY
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
         
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": 
@@ -409,7 +405,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Запускаем бота (БЕЗ asyncio.run!)
+    # Запускаем бота
     app.run_polling()
-if __name__ == "__main__":
-    asyncio.run(main())
