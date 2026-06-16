@@ -12,7 +12,7 @@ from jokes.mood_templates import get_joke_with_generator
 from jokes.triggers import get_trigger_reaction_with_mood
 
 # ========== НАСТРОЙКИ ==========
-TOKEN = '8941801294:AAG6Gf9HbxOflGfCAolC7xbFjhwgAO3IU9A'
+TOKEN = 
 WEEKLY_JOKE_LIMIT = 20
 CHANCE_TO_JOKE = 0.10
 COOLDOWN_MINUTES = 15
