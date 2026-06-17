@@ -1,4 +1,4 @@
-# bender_bot.py — полная версия для VPS с исправленным OpenAI
+# bender_bot.py — полная версия с 20% шансом шутки
 import os
 import sys
 import json
@@ -28,7 +28,7 @@ if not TELEGRAM_TOKEN:
 
 # Основные настройки
 WEEKLY_JOKE_LIMIT = 20          # Максимум шуток в неделю
-CHANCE_TO_JOKE = 0.10           # 10% шанс пошутить на каждое сообщение
+CHANCE_TO_JOKE = 0.20           # 20% шанс пошутить на каждое сообщение
 COOLDOWN_MINUTES = 15           # Минимум 15 минут между шутками
 USE_OPENAI = bool(OPENAI_API_KEY)
 STATS_FILE = 'stats.json'
@@ -37,14 +37,15 @@ STATS_FILE = 'stats.json'
 WORK_HOURS_START = 9
 WORK_HOURS_END = 23
 
+# Список триггерных слов (для проверки)
+TRIGGER_WORDS = ['пиво', 'виски', 'работа', 'начальник', 'фрай', 'лила', 'зойдберг', 'отдых', 'выходные']
+
 # ========== РАБОЧИЕ ЧАСЫ ==========
 def is_working_hours() -> bool:
     """Проверяет, сейчас рабочие часы"""
     now = datetime.now()
-    # Выходные: суббота (5) и воскресенье (6)
     if now.weekday() in [5, 6]:
         return False
-    # Рабочие часы: с 9:00 до 23:00
     current_time = now.time()
     start = time(WORK_HOURS_START, 0)
     end = time(WORK_HOURS_END, 0)
@@ -52,7 +53,6 @@ def is_working_hours() -> bool:
 
 # ========== ПОСТОЯННАЯ СТАТИСТИКА ==========
 def load_stats() -> dict:
-    """Загружает статистику из JSON-файла"""
     try:
         with open(STATS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -67,7 +67,6 @@ def load_stats() -> dict:
         }
 
 def save_stats(stats: dict):
-    """Сохраняет статистику в JSON-файл"""
     try:
         with open(STATS_FILE, 'w', encoding='utf-8') as f:
             json.dump(stats, f, indent=2, ensure_ascii=False)
@@ -75,7 +74,6 @@ def save_stats(stats: dict):
         print(f"❌ Ошибка сохранения статистики: {e}", file=sys.stderr)
 
 def can_joke(stats: dict) -> bool:
-    """Проверяет, может ли Бендер пошутить сейчас"""
     week_start = datetime.strptime(stats['week_start'], '%Y-%m-%d').date()
     today = datetime.now().date()
     
@@ -95,7 +93,6 @@ def can_joke(stats: dict) -> bool:
     return True
 
 def register_joke(stats: dict, mood=None):
-    """Регистрирует новую шутку в статистике"""
     stats['jokes_count'] += 1
     stats['total_jokes'] = stats.get('total_jokes', 0) + 1
     stats['last_joke_time'] = datetime.now().isoformat()
@@ -109,7 +106,6 @@ def register_joke(stats: dict, mood=None):
     save_stats(stats)
 
 def register_user(stats: dict, user_id: int, username: str = None):
-    """Регистрирует пользователя в статистике"""
     if 'users_interacted' not in stats:
         stats['users_interacted'] = []
     
@@ -130,42 +126,8 @@ def register_user(stats: dict, user_id: int, username: str = None):
     stats['users_interacted'].append(user_data)
     save_stats(stats)
 
-# ========== GPT-4 VISION ДЛЯ КАРТИНОК ==========
-async def analyze_image(image_url: str) -> str:
-    """Анализирует картинку через GPT-4 Vision"""
-    if not USE_OPENAI:
-        return "🧠 OpenAI отключён. Но картинка, наверное, классная!"
-    
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": 
-                    "Ты — Bender Bending Rodriguez из Futurama. "
-                    "Ты видишь картинку. Опиши её кратко, саркастично, в своём стиле. "
-                    "Если на картинке кто-то есть — облей его грязью. "
-                    "Если там еда — спроси, где твоя порция. "
-                    "Если там что-то непонятное — скажи, что ты видел и лучше."
-                },
-                {"role": "user", "content": [
-                    {"type": "text", "text": "Прокомментируй эту картинку как Бендер:"},
-                    {"type": "image_url", "image_url": {"url": image_url}}
-                ]}
-            ],
-            max_tokens=150,
-            temperature=0.9
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"❌ Ошибка Vision API: {e}", file=sys.stderr)
-        return "🤖 Картинка — ерунда, я видел и лучше. Принесите виски!"
-
-# ========== GPT ДЛЯ ТЕКСТА ==========
+# ========== GPT ДЛЯ ТЕКСТА (если понадобится) ==========
 async def get_openai_response(prompt: str) -> str:
-    """Получить ответ от OpenAI с характером Бендера"""
     if not USE_OPENAI:
         return None
     
@@ -195,7 +157,6 @@ async def get_openai_response(prompt: str) -> str:
 
 # ========== КОМАНДЫ БОТА ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start"""
     stats = load_stats()
     register_user(stats, update.effective_user.id, update.effective_user.username)
     
@@ -209,7 +170,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Лимит на неделю: {WEEKLY_JOKE_LIMIT} шуток\n"
         f"Всего шуток сказано: {stats.get('total_jokes', 0)}\n"
         f"{'🧠 OpenAI: ВКЛЮЧЕН' if USE_OPENAI else '🧠 OpenAI: ОТКЛЮЧЕН'}\n"
-        f"🖼️ Vision: {'ВКЛЮЧЕН' if USE_OPENAI else 'ОТКЛЮЧЕН'}\n\n"
+        f"🎲 Шанс шутки: {int(CHANCE_TO_JOKE * 100)}%\n\n"
         f"*Bite my shiny metal ass!*\n\n"
         f"📝 *Команды:*\n"
         f"/stats — статистика шуток\n"
@@ -220,7 +181,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /stats"""
     stats = load_stats()
     register_user(stats, update.effective_user.id, update.effective_user.username)
     
@@ -243,7 +203,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def mood_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /mood"""
     stats = load_stats()
     register_user(stats, update.effective_user.id, update.effective_user.username)
     
@@ -268,7 +227,6 @@ async def mood_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def characters_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /characters"""
     stats = load_stats()
     register_user(stats, update.effective_user.id, update.effective_user.username)
     
@@ -285,7 +243,6 @@ async def characters_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /help"""
     await update.message.reply_text(
         f"🤖 *Команды Бендера:*\n\n"
         f"/start — приветствие и статус\n"
@@ -298,67 +255,69 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"«пиво», «виски», «отдых» — обрадуюсь 🍺\n"
         f"«Фрай», «Лила», «Зойдберг» — расскажу о них\n\n"
         f"*Дополнительно:*\n"
-        f"🖼️ Отправь картинку — я её прокомментирую\n"
         f"⏰ Работаю с 9:00 до 23:00 по будням\n"
-        f"🎲 Шучу случайно — 10% на каждое сообщение\n"
+        f"🎲 Шучу случайно — {int(CHANCE_TO_JOKE * 100)}% на каждое сообщение\n"
         f"📊 Лимит: {WEEKLY_JOKE_LIMIT} шуток в неделю\n"
         f"{'🧠 OpenAI: включён' if USE_OPENAI else '🧠 OpenAI: отключён'}",
         parse_mode='Markdown'
     )
 
-# ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик картинок"""
-    stats = load_stats()
-    register_user(stats, update.effective_user.id, update.effective_user.username)
-    
-    if not is_working_hours():
-        await update.message.reply_text("⏰ Я отдыхаю. Приходи с 9 до 23 по будням.")
-        return
-    
-    photo = update.message.photo[-1]
-    file = await context.bot.get_file(photo.file_id)
-    image_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file.file_path}"
-    
-    await update.message.reply_text("🔍 Смотрю на картинку своими глазами-лампочками...")
-    
-    if USE_OPENAI:
-        comment = await analyze_image(image_url)
-    else:
-        comment = "🖼️ Картинка — ерунда! Я видел и лучше. Принесите виски! 🍺"
-    
-    await update.message.reply_text(f"🤖 *Бендер:* {comment}", parse_mode='Markdown')
-
+# ========== ГЛАВНЫЙ ОБРАБОТЧИК СООБЩЕНИЙ ==========
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Главный обработчик текстовых сообщений"""
+    # Игнорируем свои сообщения
     if update.message.from_user.id == context.bot.id:
         return
     
+    # Игнорируем сообщения без текста
+    if not update.message.text:
+        return
+    
+    # Проверяем рабочие часы
     if not is_working_hours():
         await update.message.reply_text("⏰ Я отдыхаю. Приходи с 9 до 23 по будням.")
         return
     
+    text = update.message.text
     stats = load_stats()
     register_user(stats, update.effective_user.id, update.effective_user.username)
     
-    if not update.message.text:
+    # === ПРОВЕРКА: ПОЗВАЛИ ЛИ БОТА ===
+    is_mentioned = context.bot.username in text
+    is_reply_to_bot = update.message.reply_to_message and update.message.reply_to_message.from_user.id == context.bot.id
+    
+    # === ПРОВЕРКА: ЕСТЬ ЛИ ТРИГГЕР ===
+    has_trigger = any(word in text.lower() for word in TRIGGER_WORDS)
+    
+    # === ЛОГИКА ОТВЕТА ===
+    
+    # 1. Если позвали или ответили — отвечаем всегда
+    if is_mentioned or is_reply_to_bot:
+        print(f"📨 Позвали! Отвечаю на: {text}", file=sys.stderr)
+        _, current_mood = get_joke_by_mood()
+        trigger_response = get_trigger_reaction_with_mood(text, current_mood)
+        if trigger_response:
+            await update.message.reply_text(f"🤖 *Бендер:* {trigger_response}", parse_mode='Markdown')
+            return
+        
+        # Если нет триггера — отвечаем обычным ответом
+        await update.message.reply_text(
+            f"🤖 *Бендер:* {text}\n\n*Bite my shiny metal ass!*",
+            parse_mode='Markdown'
+        )
         return
     
-    text = update.message.text
-    if text.startswith('/'):
+    # 2. Если есть триггер — отвечаем всегда (даже если не звали)
+    if has_trigger:
+        print(f"📨 Сработал триггер: {text}", file=sys.stderr)
+        _, current_mood = get_joke_by_mood()
+        trigger_response = get_trigger_reaction_with_mood(text, current_mood)
+        if trigger_response:
+            await update.message.reply_text(f"🤖 *Бендер:* {trigger_response}", parse_mode='Markdown')
         return
     
-    print(f"📨 Получено: {text}", file=sys.stderr)
-    
-    # 1. Триггеры (самый высокий приоритет)
-    _, current_mood = get_joke_by_mood()
-    trigger_response = get_trigger_reaction_with_mood(text, current_mood)
-    if trigger_response:
-        await update.message.reply_text(f"🤖 *Бендер:* {trigger_response}", parse_mode='Markdown')
-        return
-    
-    # 2. Спонтанные шутки (10% шанс, с проверкой лимита и таймаута)
+    # 3. В остальных случаях — с вероятностью 20% шутим
     if random.random() < CHANCE_TO_JOKE and can_joke(stats):
+        print(f"📨 Бендер решил пошутить: {text}", file=sys.stderr)
         joke, current_mood = get_joke_by_mood()
         if random.random() < 0.3:
             joke = get_joke_with_generator(JOKES_BANK, use_generator_probability=0.3)
@@ -366,28 +325,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🤖 *Бендер:* {joke}", parse_mode='Markdown')
         return
     
-    # 3. OpenAI (если включён и сообщение длиннее 10 символов)
-    if USE_OPENAI and len(text) > 10:
-        print("🧠 Запрос к OpenAI...", file=sys.stderr)
-        gpt_response = await get_openai_response(text)
-        if gpt_response:
-            await update.message.reply_text(f"🤖 *Бендер:* {gpt_response}", parse_mode='Markdown')
+    # 4. Молчит, если ничего не сработало
+    print(f"📨 Бендер молчит: {text}", file=sys.stderr)
+
+# ========== ОБРАБОТЧИК КАРТИНОК ==========
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    stats = load_stats()
+    register_user(stats, update.effective_user.id, update.effective_user.username)
+    
+    if not is_working_hours():
+        await update.message.reply_text("⏰ Я отдыхаю. Приходи с 9 до 23 по будням.")
+        return
+    
+    # Если картинка в группе — проверяем, позвали ли бота
+    if update.message.chat.type in ['group', 'supergroup']:
+        if not context.bot.username in update.message.caption:
+            print("📨 Картинка в группе, бота не позвали — игнорирую", file=sys.stderr)
             return
     
-    # 4. Обычный ответ (если ничего не сработало)
-    await update.message.reply_text(
-        f"🤖 *Бендер:* {text}\n\n*Bite my shiny metal ass!*",
-        parse_mode='Markdown'
-    )
+    photo = update.message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+    image_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file.file_path}"
+    
+    await update.message.reply_text("🔍 Смотрю на картинку своими глазами-лампочками...")
+    comment = "🖼️ Картинка — ерунда! Я видел и лучше. Принесите виски! 🍺"
+    
+    await update.message.reply_text(f"🤖 *Бендер:* {comment}", parse_mode='Markdown')
 
 # ========== ЗАПУСК БОТА ==========
 if __name__ == "__main__":
     print("🚀 Бендер запускается на VPS через polling...")
     print(f"📋 Токен Telegram: {TELEGRAM_TOKEN[:10]}... (скрыто)")
     print(f"📋 OpenAI: {'ВКЛЮЧЕН' if USE_OPENAI else 'ОТКЛЮЧЕН'}")
-    print(f"🖼️ Vision: {'ВКЛЮЧЕН' if USE_OPENAI else 'ОТКЛЮЧЕН'}")
+    print(f"🖼️ Vision: ОТКЛЮЧЕН")
     print(f"⏰ Рабочие часы: {WORK_HOURS_START}:00 — {WORK_HOURS_END}:00 по будням")
-    print(f"🎲 Шанс шутки: {CHANCE_TO_JOKE * 100}% на каждое сообщение")
+    print(f"🎲 Шанс шутки: {int(CHANCE_TO_JOKE * 100)}% на каждое сообщение")
     print(f"📊 Лимит шуток в неделю: {WEEKLY_JOKE_LIMIT}")
     print(f"⏱️ Таймаут между шутками: {COOLDOWN_MINUTES} минут")
     
