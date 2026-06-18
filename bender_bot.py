@@ -1,10 +1,10 @@
-# bender_bot.py — полная версия с OpenAI и исправленным упоминанием
+# bender_bot.py — умеренный режим с кулдауном
 import os
 import sys
 import json
 import random
 import asyncio
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -28,8 +28,10 @@ if not TELEGRAM_TOKEN:
 
 # Основные настройки
 WEEKLY_JOKE_LIMIT = 20          # Максимум шуток в неделю
-CHANCE_TO_JOKE = 0.20           # 20% шанс пошутить на каждое сообщение
-COOLDOWN_MINUTES = 15           # Минимум 15 минут между шутками
+CHANCE_TO_JOKE = 0.10           # 10% шанс пошутить (умеренный режим)
+COOLDOWN_MINUTES = 15           # Минут между шутками (для счётчика)
+RESPONSE_COOLDOWN = 60          # Секунд между любыми ответами
+OPENAI_MIN_LENGTH = 20          # Минимальная длина для OpenAI
 USE_OPENAI = bool(OPENAI_API_KEY)
 STATS_FILE = 'stats.json'
 
@@ -39,6 +41,9 @@ WORK_HOURS_END = 23
 
 # Список триггерных слов (для проверки)
 TRIGGER_WORDS = ['пиво', 'виски', 'работа', 'начальник', 'фрай', 'лила', 'зойдберг', 'отдых', 'выходные']
+
+# Глобальная переменная для кулдауна
+_last_response_time = None
 
 # ========== РАБОЧИЕ ЧАСЫ ==========
 def is_working_hours() -> bool:
@@ -126,6 +131,19 @@ def register_user(stats: dict, user_id: int, username: str = None):
     stats['users_interacted'].append(user_data)
     save_stats(stats)
 
+def can_respond():
+    """Проверяет, можно ли отвечать (кулдаун)"""
+    global _last_response_time
+    if _last_response_time is None:
+        return True
+    elapsed = (datetime.now() - _last_response_time).total_seconds()
+    return elapsed >= RESPONSE_COOLDOWN
+
+def update_response_time():
+    """Обновляет время последнего ответа"""
+    global _last_response_time
+    _last_response_time = datetime.now()
+
 # ========== GPT ДЛЯ ТЕКСТА ==========
 async def get_openai_response(prompt: str) -> str:
     if not USE_OPENAI:
@@ -170,7 +188,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Лимит на неделю: {WEEKLY_JOKE_LIMIT} шуток\n"
         f"Всего шуток сказано: {stats.get('total_jokes', 0)}\n"
         f"{'🧠 OpenAI: ВКЛЮЧЕН' if USE_OPENAI else '🧠 OpenAI: ОТКЛЮЧЕН'}\n"
-        f"🎲 Шанс шутки: {int(CHANCE_TO_JOKE * 100)}%\n\n"
+        f"🎲 Шанс шутки: {int(CHANCE_TO_JOKE * 100)}%\n"
+        f"⏱️ Кулдаун: {RESPONSE_COOLDOWN} сек\n\n"
         f"*Bite my shiny metal ass!*\n\n"
         f"📝 *Команды:*\n"
         f"/stats — статистика шуток\n"
@@ -258,12 +277,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏰ Работаю с 9:00 до 23:00 по будням\n"
         f"🎲 Шучу случайно — {int(CHANCE_TO_JOKE * 100)}% на каждое сообщение\n"
         f"📊 Лимит: {WEEKLY_JOKE_LIMIT} шуток в неделю\n"
+        f"⏱️ Кулдаун: {RESPONSE_COOLDOWN} секунд\n"
         f"{'🧠 OpenAI: включён' if USE_OPENAI else '🧠 OpenAI: отключён'}",
         parse_mode='Markdown'
     )
 
 # ========== ГЛАВНЫЙ ОБРАБОТЧИК СООБЩЕНИЙ ==========
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global _last_response_time
+    
     # Игнорируем свои сообщения
     if update.message.from_user.id == context.bot.id:
         return
@@ -288,6 +310,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === ПРОВЕРКА: ЕСТЬ ЛИ ТРИГГЕР ===
     has_trigger = any(word in text.lower() for word in TRIGGER_WORDS)
     
+    # === КУЛДАУН (не применяется к триггерам и упоминаниям) ===
+    if not (is_mentioned or is_reply_to_bot or has_trigger):
+        if not can_respond():
+            print(f"📨 Кулдаун, пропускаю: {text}", file=sys.stderr)
+            return
+    
     # === ЛОГИКА ОТВЕТА ===
     
     # 1. Если позвали или ответили — отвечаем всегда
@@ -297,14 +325,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         trigger_response = get_trigger_reaction_with_mood(text, current_mood)
         if trigger_response:
             await update.message.reply_text(f"🤖 *Бендер:* {trigger_response}", parse_mode='Markdown')
+            update_response_time()
             return
         
         # Если есть OpenAI и сообщение длинное — используем его
-        if USE_OPENAI and len(text) > 10:
+        if USE_OPENAI and len(text) >= OPENAI_MIN_LENGTH:
             print(f"🧠 Запрос к OpenAI (упоминание)...", file=sys.stderr)
             gpt_response = await get_openai_response(text)
             if gpt_response:
                 await update.message.reply_text(f"🤖 *Бендер:* {gpt_response}", parse_mode='Markdown')
+                update_response_time()
                 return
         
         # Если нет триггера и нет OpenAI — отвечаем обычным ответом
@@ -312,6 +342,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🤖 *Бендер:* {text}\n\n*Bite my shiny metal ass!*",
             parse_mode='Markdown'
         )
+        update_response_time()
         return
     
     # 2. Если есть триггер — отвечаем всегда (даже если не звали)
@@ -321,9 +352,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         trigger_response = get_trigger_reaction_with_mood(text, current_mood)
         if trigger_response:
             await update.message.reply_text(f"🤖 *Бендер:* {trigger_response}", parse_mode='Markdown')
+            update_response_time()
         return
     
-    # 3. В остальных случаях — с вероятностью 20% шутим
+    # 3. В остальных случаях — с вероятностью 10% шутим
     if random.random() < CHANCE_TO_JOKE and can_joke(stats):
         print(f"📨 Бендер решил пошутить: {text}", file=sys.stderr)
         joke, current_mood = get_joke_by_mood()
@@ -331,14 +363,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             joke = get_joke_with_generator(JOKES_BANK, use_generator_probability=0.3)
         register_joke(stats, current_mood)
         await update.message.reply_text(f"🤖 *Бендер:* {joke}", parse_mode='Markdown')
+        update_response_time()
         return
     
-    # 4. OpenAI (если включён и сообщение длиннее 10 символов)
-    if USE_OPENAI and len(text) > 10:
+    # 4. OpenAI (если включён и сообщение длиннее 20 символов)
+    if USE_OPENAI and len(text) >= OPENAI_MIN_LENGTH and can_respond():
         print(f"🧠 Запрос к OpenAI...", file=sys.stderr)
         gpt_response = await get_openai_response(text)
         if gpt_response:
             await update.message.reply_text(f"🤖 *Бендер:* {gpt_response}", parse_mode='Markdown')
+            update_response_time()
             return
     
     # 5. Молчит, если ничего не сработало
@@ -359,6 +393,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print("📨 Картинка в группе, бота не позвали — игнорирую", file=sys.stderr)
             return
     
+    # Проверка кулдауна для картинок
+    if not can_respond():
+        print("📨 Кулдаун, пропускаю картинку", file=sys.stderr)
+        return
+    
     photo = update.message.photo[-1]
     file = await context.bot.get_file(photo.file_id)
     image_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file.file_path}"
@@ -367,6 +406,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     comment = "🖼️ Картинка — ерунда! Я видел и лучше. Принесите виски! 🍺"
     
     await update.message.reply_text(f"🤖 *Бендер:* {comment}", parse_mode='Markdown')
+    update_response_time()
 
 # ========== ЗАПУСК БОТА ==========
 if __name__ == "__main__":
@@ -378,6 +418,7 @@ if __name__ == "__main__":
     print(f"🎲 Шанс шутки: {int(CHANCE_TO_JOKE * 100)}% на каждое сообщение")
     print(f"📊 Лимит шуток в неделю: {WEEKLY_JOKE_LIMIT}")
     print(f"⏱️ Таймаут между шутками: {COOLDOWN_MINUTES} минут")
+    print(f"⏱️ Кулдаун между ответами: {RESPONSE_COOLDOWN} секунд")
     
     # Создаём приложение
     app = Application.builder().token(TELEGRAM_TOKEN).build()
