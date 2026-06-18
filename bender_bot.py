@@ -1,4 +1,4 @@
-# bender_bot.py — полная версия с OpenAI
+# bender_bot.py — полная версия с OpenAI и исправленным упоминанием
 import os
 import sys
 import json
@@ -299,7 +299,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"🤖 *Бендер:* {trigger_response}", parse_mode='Markdown')
             return
         
-        # Если нет триггера — отвечаем обычным ответом
+        # Если есть OpenAI и сообщение длинное — используем его
+        if USE_OPENAI and len(text) > 10:
+            print(f"🧠 Запрос к OpenAI (упоминание)...", file=sys.stderr)
+            gpt_response = await get_openai_response(text)
+            if gpt_response:
+                await update.message.reply_text(f"🤖 *Бендер:* {gpt_response}", parse_mode='Markdown')
+                return
+        
+        # Если нет триггера и нет OpenAI — отвечаем обычным ответом
         await update.message.reply_text(
             f"🤖 *Бендер:* {text}\n\n*Bite my shiny metal ass!*",
             parse_mode='Markdown'
