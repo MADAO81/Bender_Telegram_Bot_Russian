@@ -1,4 +1,4 @@
-# bender_bot.py — полная версия с 20% шансом шутки
+# bender_bot.py — полная версия с OpenAI
 import os
 import sys
 import json
@@ -126,7 +126,7 @@ def register_user(stats: dict, user_id: int, username: str = None):
     stats['users_interacted'].append(user_data)
     save_stats(stats)
 
-# ========== GPT ДЛЯ ТЕКСТА (если понадобится) ==========
+# ========== GPT ДЛЯ ТЕКСТА ==========
 async def get_openai_response(prompt: str) -> str:
     if not USE_OPENAI:
         return None
@@ -325,7 +325,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🤖 *Бендер:* {joke}", parse_mode='Markdown')
         return
     
-    # 4. Молчит, если ничего не сработало
+    # 4. OpenAI (если включён и сообщение длиннее 10 символов)
+    if USE_OPENAI and len(text) > 10:
+        print(f"🧠 Запрос к OpenAI...", file=sys.stderr)
+        gpt_response = await get_openai_response(text)
+        if gpt_response:
+            await update.message.reply_text(f"🤖 *Бендер:* {gpt_response}", parse_mode='Markdown')
+            return
+    
+    # 5. Молчит, если ничего не сработало
     print(f"📨 Бендер молчит: {text}", file=sys.stderr)
 
 # ========== ОБРАБОТЧИК КАРТИНОК ==========
