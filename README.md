@@ -14,7 +14,7 @@
 
 | Функция | Описание |
 | :--- | :--- |
-| 💬 **Комментирует сообщения** | С вероятностью 20% влезает в любой диалог |
+| 💬 **Комментирует сообщения** | С вероятностью 10% влезает в любой диалог |
 | 🎯 **Реагирует на триггеры** | Мгновенно отвечает на «пиво», «работу», «Фрай» и другие |
 | 🎭 **Система настроения** | Меняет характер в зависимости от времени суток |
 | 📊 **Статистика** | Следит за количеством шуток и пользователей |
@@ -22,6 +22,7 @@
 | 🧠 **OpenAI (опционально)** | Генерирует умные ответы в стиле Бендера |
 | ⏰ **Рабочие часы** | Активен по будням с 9:00 до 23:00 |
 | 🔒 **Безопасное хранение токенов** | Все секреты в `.env` файле |
+| ⏱️ **Кулдаун** | 60 секунд между ответами (кроме триггеров и упоминаний) |
 
 ---
 
@@ -72,8 +73,8 @@ Bender_Telegram_Bot_Russian/
 🚀 Быстрый старт
 1. Клонируйте репозиторий
 bash
-git clone https://github.com/ваш-аккаунт/bender-telegram-bot.git
-cd bender-telegram-bot
+git clone https://github.com/MADAO81/Bender_Telegram_Bot_Russian.git
+cd Bender_Telegram_Bot_Russian
 2. Установите зависимости
 bash
 pip install -r requirements.txt
@@ -95,10 +96,12 @@ python bender_bot.py
 
 Параметр	Значение по умолчанию	Описание
 WEEKLY_JOKE_LIMIT	20	Лимит шуток в неделю
-CHANCE_TO_JOKE	0.20	20% шанс пошутить на каждое сообщение
+CHANCE_TO_JOKE	0.10	10% шанс пошутить на каждое сообщение
 COOLDOWN_MINUTES	15	Минуты между шутками
+RESPONSE_COOLDOWN	60	Секунд между любыми ответами
 WORK_HOURS_START	9	Начало рабочего дня
 WORK_HOURS_END	23	Конец рабочего дня
+OFF_HOURS_CHANCE	0.15	15% шанс ответить в нерабочее время
 ☁️ Деплой на VPS
 Рекомендуется запускать бота на VPS (Beget, SprintBox, Timeweb). Инструкция по настройке:
 
@@ -111,8 +114,8 @@ apt update && apt upgrade -y
 apt install python3 python3-pip python3-venv git -y
 3. Склонируйте репозиторий
 bash
-git clone https://github.com/ваш-аккаунт/bender-telegram-bot.git
-cd bender-telegram-bot
+git clone https://github.com/MADAO81/Bender_Telegram_Bot_Russian.git
+cd Bender_Telegram_Bot_Russian
 4. Настройте виртуальное окружение
 bash
 python3 -m venv venv
@@ -131,8 +134,8 @@ After=network.target
 
 [Service]
 User=root
-WorkingDirectory=/root/bender-telegram-bot
-ExecStart=/root/bender-telegram-bot/venv/bin/python /root/bender-telegram-bot/bender_bot.py
+WorkingDirectory=/root/Bender_Telegram_Bot_Russian
+ExecStart=/root/Bender_Telegram_Bot_Russian/venv/bin/python /root/Bender_Telegram_Bot_Russian/bender_bot.py
 Restart=always
 
 [Install]
@@ -158,7 +161,7 @@ systemctl status benderbot
 — 😠 Работа? Фу! Это слово вызывает у меня коррозию.
 
 Пользователь:
-— @BenderBot привет!
+— @BenderRodriguezRusBot привет!
 
 Бендер:
 
@@ -169,7 +172,7 @@ systemctl status benderbot
 Закомментируйте OPENAI_API_KEY в .env.
 
 Как изменить частоту шуток?
-Измените CHANCE_TO_JOKE = 0.20 в bender_bot.py.
+Измените CHANCE_TO_JOKE = 0.10 в bender_bot.py.
 
 Где хранится статистика?
 В файле stats.json в корне проекта.
